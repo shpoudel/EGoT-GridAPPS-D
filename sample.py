@@ -38,7 +38,7 @@
 # UNITED STATES DEPARTMENT OF ENERGY under Contract DE-AC05-76RL01830
 # -------------------------------------------------------------------------------
 """
-Created on Sept 22, 2020
+Created on April 13, 2021
 
 @author: Shiva Poudel
 """""
@@ -57,7 +57,6 @@ import importlib
 import numpy as np
 import time
 from tabulate import tabulate
-from glm import GLMManager
 import re
 from datetime import datetime
 # import utils
@@ -65,11 +64,11 @@ from datetime import datetime
 from gridappsd import GridAPPSD, topics, DifferenceBuilder
 from gridappsd.topics import simulation_output_topic, simulation_log_topic, simulation_input_topic
 
-global exit_flag, df_sw_meas, simulation_id
+global exit_flag, df_sw_meas, simulation_id, count, load_meas
+count = 5
 
 def on_message(headers, message):
-    global exit_flag, df_sw_meas
-    simulation_id = '630757643'
+    global exit_flag, df_sw_meas, simulation_id, count, load_meas
     gapps = GridAPPSD()
     publish_to_topic = simulation_input_topic(simulation_id)
     if type(message) == str:
@@ -83,20 +82,34 @@ def on_message(headers, message):
 
     else:
         meas_data = message["message"]["measurements"]
-        for k in range (df_sw_meas.shape[0]):
-            measid = df_sw_meas['measid'][k]
-            status = meas_data[measid]['value']
-            print(df_sw_meas['name'][k], status)
-            print('..................')
-        
-        sw8 = '_382F5D22-0DB5-4F62-8011-D5D522A45141'
-        sw_diff = DifferenceBuilder(simulation_id)
-        sw_diff.add_difference("_382F5D22-0DB5-4F62-8011-D5D522A45141", "Switch.open", 0, 1)
-        msgP = sw_diff.get_message()
-        print(msgP)
-        gapps.send(publish_to_topic, json.dumps(msgP))
-
-                  
+        timestamp = message["message"]["timestamp"]
+        count += 1
+        if count == 10:
+            # Print the switch status just once                    
+            for k in range (df_sw_meas.shape[0]):
+                measid = df_sw_meas['measid'][k]
+                status = meas_data[measid]['value']
+                print(df_sw_meas['name'][k], status)
+                print('..................')
+            
+        ld = load_meas[10]
+        measid = ld['measid']
+        pq = meas_data[measid]
+        phi = (pq['angle'])*math.pi/180
+        kW = 0.001 * pq['magnitude']*np.cos(phi)
+        kVAR = 0.001* pq['magnitude']*np.sin(phi)
+        # Prints out the timestamp and load values at each time step. 
+        print(timestamp, ld['name'], kW, kVAR)
+        print('..................')
+        if count == 10:
+            load_id = ld['eqid']
+            ld_diff = DifferenceBuilder(simulation_id)
+            ld_diff.add_difference(load_id, "EnergyConsumer.p", 500, 1)
+            msgP = ld_diff.get_message()
+            print(msgP)
+            # This message signal is sent to control the load. However, the control is not implemented
+            # The load/house control capacbility to evolve with new GridAPPS-D architecture
+            gapps.send(publish_to_topic, json.dumps(msgP))               
         
 
 def query_switches (feeder_mrid, model_api_topic,):
@@ -148,42 +161,52 @@ def query_switches (feeder_mrid, model_api_topic,):
    
 def _main():
     
-    global df_sw_meas
-    simulation_id = '630757643'
-    feeder_mrid = "_C1C3E687-6FFD-C753-582B-632A27E28507"
+    global simulation_id, df_sw_meas, load_meas
+    simulation_id = sys.argv[1]
+    feeder_mrid = sys.argv[2]
 
     # This topic is different for different API
     model_api_topic = "goss.gridappsd.process.request.data.powergridmodel"
-    
-    gapps = GridAPPSD("('localhost', 61613)", username='system', password='manager')
+
+    # Note: there are other parameters for connecting to
+    # systems other than localhost
+    gapps = GridAPPSD()
+    # gapps = GridAPPSD(username="user", password="pass")
     query_switches(feeder_mrid, model_api_topic)
 
     message = {
-        "modelId": "_C1C3E687-6FFD-C753-582B-632A27E28507",
+        "modelId": feeder_mrid,
         "requestType": "QUERY_OBJECT_DICT",
         "resultFormat": "JSON",
         "objectType": "LoadBreakSwitch"
-        }
-    
+        }    
     sw_dict = gapps.get_response(model_api_topic, message, timeout=10)
-    print(sw_dict)
+    # print(sw_dict)
    
-
     message = {
-        "modelId": "_C1C3E687-6FFD-C753-582B-632A27E28507",
+        "modelId": feeder_mrid,
         "requestType": "QUERY_OBJECT_MEASUREMENTS",
         "resultFormat": "JSON",
         "objectType": "LoadBreakSwitch"
         }
-        
     sw_meas = gapps.get_response(model_api_topic, message, timeout=10)
     sw_meas = sw_meas['data']
-    print(sw_meas)
-    
+    # print(sw_meas)
     # Filter the response based on type
     sw_meas = [e for e in sw_meas if e['type'] == 'Pos']
     df_sw_meas = pd.DataFrame(sw_meas)  
-    print(df_sw_meas)
+    # print(df_sw_meas)
+
+    message = {
+        "modelId": feeder_mrid,
+        "requestType": "QUERY_OBJECT_MEASUREMENTS",
+        "resultFormat": "JSON",
+        "objectType": "EnergyConsumer"
+        }        
+    load_meas = gapps.get_response(model_api_topic, message, timeout=10)
+    load_meas = load_meas['data']
+    load_meas = [l for l in load_meas if l['type'] =='VA']
+    # print(load_meas)
     
     sim_output_topic = simulation_output_topic(simulation_id)
    
