@@ -162,8 +162,8 @@ def query_switches (feeder_mrid, model_api_topic,):
 def _main():
     
     global simulation_id, df_sw_meas, load_meas
-    simulation_id = sys.argv[1]
-    feeder_mrid = sys.argv[2]
+    simulation_id = sys.argv[2]
+    feeder_mrid = sys.argv[1]
 
     # This topic is different for different API
     model_api_topic = "goss.gridappsd.process.request.data.powergridmodel"
