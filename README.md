@@ -15,5 +15,6 @@ The following steps will run the two sample code inside the directory.
 1. Once inside the directory invoke:
     ```console
     python3 sample_class.py  feeder_mrid simulation_id
+    OR
     ./run.sh 123 6567788
     ```
